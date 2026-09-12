@@ -1,26 +1,32 @@
 const { parseKey } = require('./keys');
 const { playBasic, stopBasic } = require('./basicPlayer');
+const { clearLines } = require('./render');
 
-/**
- * Renders the songs menu to stdout with cursor and playback status.
- *
- * @param {object} state - App state object
- */
+// Terminal Rendering Architecture:
+// A terminal is a grid of character cells, not a webpage — there's no DOM,
+// so "updating" means overwriting the same cells.
 function render(state) {
-  console.clear();
-  if (!state.songs || state.songs.length === 0) {
-    console.log('No songs found in songs directory.');
-    return;
+  if (state.lastLinesCount > 0) {
+    clearLines(state.lastLinesCount);
   }
 
-  state.songs.forEach((song, index) => {
-    const marker = index === state.cursor ? '> ' : '  ';
-    let status = '';
-    if (index === state.currentIndex) {
-      status = state.paused ? ' (paused)' : ' (playing)';
-    }
-    console.log(`${marker}${song.name}${status}`);
-  });
+  let linesCount = 0;
+  if (!state.songs || state.songs.length === 0) {
+    console.log('No songs found in songs directory.');
+    linesCount = 1;
+  } else {
+    state.songs.forEach((song, index) => {
+      const marker = index === state.cursor ? '> ' : '  ';
+      let status = '';
+      if (index === state.currentIndex) {
+        status = state.paused ? ' (paused)' : ' (playing)';
+      }
+      console.log(`${marker}${song.name}${status}`);
+      linesCount++;
+    });
+  }
+
+  state.lastLinesCount = linesCount;
 }
 
 // SIGSTOP and SIGCONT are the same syscalls as running `kill -SIGSTOP <pid>` in a terminal —
@@ -123,6 +129,7 @@ function createApp(songs = []) {
     currentIndex: null,
     player: null,
     paused: false,
+    lastLinesCount: 0,
   };
 
   // Calling process.stdin.setRawMode(true) is the Node equivalent of `stty raw` —
