@@ -42,6 +42,75 @@ function togglePause(state) {
 }
 
 /**
+ * Plays a song at the specified index.
+ *
+ * @param {object} state - App state object
+ * @param {number} index - Index of the song to play
+ */
+function playSong(state, index) {
+  if (!state.songs || state.songs.length === 0) {
+    return;
+  }
+
+  state.currentIndex = index;
+  state.cursor = index;
+  stopBasic();
+
+  const player = playBasic(state.songs[index].filePath);
+  state.player = player;
+  state.paused = false;
+
+  player.on('exit', () => {
+    if (state.player === player) {
+      state.player = null;
+      state.currentIndex = null;
+      state.paused = false;
+      render(state);
+    }
+  });
+
+  render(state);
+}
+
+// Track Navigation:
+// A "skip" is just kill + spawn a new process on a different file.
+function playRelative(state, offset) {
+  if (!state || !state.songs || state.songs.length === 0) {
+    return;
+  }
+
+  const baseIndex = state.currentIndex !== null ? state.currentIndex : state.cursor;
+  const len = state.songs.length;
+  const nextIndex = ((baseIndex + offset) % len + len) % len;
+
+  playSong(state, nextIndex);
+}
+
+// Terminal and Process Cleanup:
+// Without this cleanup, an orphaned child process keeps running with no parent
+// to stop it, and the terminal is left stuck in raw mode.
+function cleanupAndExit(state) {
+  if (state && state.player && state.paused) {
+    try {
+      state.player.kill('SIGCONT');
+    } catch {}
+  }
+  stopBasic();
+  if (state) {
+    state.player = null;
+    state.currentIndex = null;
+    state.paused = false;
+  }
+  if (process.stdin.setRawMode) {
+    try {
+      process.stdin.setRawMode(false);
+    } catch {}
+  }
+  process.stdin.pause();
+  process.exit(0);
+}
+
+/**
  * Starts the interactive raw-mode terminal music player loop.
  *
  * @param {Array} songs - Array of discovered song objects
@@ -70,12 +139,22 @@ function createApp(songs = []) {
     const key = parseKey(chunk);
 
     if (key === 'ctrl-c' || key === 'q') {
-      cleanup();
-      process.exit(0);
+      cleanupAndExit(state);
+      return;
     }
 
     if (key === 'p' || key === 'space') {
       togglePause(state);
+      return;
+    }
+
+    if (key === 'n') {
+      playRelative(state, 1);
+      return;
+    }
+
+    if (key === 'b') {
+      playRelative(state, -1);
       return;
     }
 
@@ -87,54 +166,20 @@ function createApp(songs = []) {
         state.cursor = (state.cursor + 1) % state.songs.length;
         render(state);
       } else if (key === 'enter') {
-        state.currentIndex = state.cursor;
-        stopBasic();
-        const player = playBasic(state.songs[state.cursor].filePath);
-        state.player = player;
-        state.paused = false;
-        player.on('exit', () => {
-          if (state.player === player) {
-            state.player = null;
-            state.currentIndex = null;
-            state.paused = false;
-            render(state);
-          }
-        });
-        render(state);
+        playSong(state, state.cursor);
       }
     }
   };
 
   process.stdin.on('data', onData);
 
-  function cleanup() {
-    if (state.player && state.paused) {
-      try {
-        state.player.kill('SIGCONT');
-      } catch {}
-    }
-    stopBasic();
-    state.player = null;
-    state.currentIndex = null;
-    state.paused = false;
-    process.stdin.removeListener('data', onData);
-    if (process.stdin.setRawMode) {
-      try {
-        process.stdin.setRawMode(false);
-      } catch {}
-    }
-    process.stdin.pause();
-  }
-
   state.togglePause = () => togglePause(state);
-  state.cleanup = cleanup;
+  state.playRelative = (offset) => playRelative(state, offset);
+  state.cleanupAndExit = () => cleanupAndExit(state);
 
-  process.stdin.once('end', cleanup);
-  process.once('exit', cleanup);
-  process.once('SIGINT', () => {
-    cleanup();
-    process.exit(0);
-  });
+  process.stdin.once('end', () => cleanupAndExit(state));
+  process.on('SIGINT', () => cleanupAndExit(state));
+  process.on('SIGTERM', () => cleanupAndExit(state));
 
   return state;
 }
@@ -144,6 +189,9 @@ createApp.startApp = createApp;
 createApp.app = createApp;
 createApp.render = render;
 createApp.togglePause = togglePause;
+createApp.playSong = playSong;
+createApp.playRelative = playRelative;
+createApp.cleanupAndExit = cleanupAndExit;
 createApp.default = createApp;
 
 module.exports = createApp;
