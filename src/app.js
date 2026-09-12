@@ -2,7 +2,7 @@ const { parseKey } = require('./keys');
 const { playBasic, stopBasic } = require('./basicPlayer');
 
 /**
- * Renders the songs menu to stdout with the current cursor position highlighted.
+ * Renders the songs menu to stdout with cursor and playback status.
  *
  * @param {object} state - App state object
  */
@@ -15,8 +15,30 @@ function render(state) {
 
   state.songs.forEach((song, index) => {
     const marker = index === state.cursor ? '> ' : '  ';
-    console.log(`${marker}${song.name}`);
+    let status = '';
+    if (index === state.currentIndex) {
+      status = state.paused ? ' (paused)' : ' (playing)';
+    }
+    console.log(`${marker}${song.name}${status}`);
   });
+}
+
+// SIGSTOP and SIGCONT are the same syscalls as running `kill -SIGSTOP <pid>` in a terminal —
+// they freeze/resume a process without killing it, unlike SIGKILL.
+function togglePause(state) {
+  if (!state || !state.player) {
+    return;
+  }
+
+  if (state.paused) {
+    state.player.kill('SIGCONT');
+    state.paused = false;
+  } else {
+    state.player.kill('SIGSTOP');
+    state.paused = true;
+  }
+
+  render(state);
 }
 
 /**
@@ -52,6 +74,11 @@ function createApp(songs = []) {
       process.exit(0);
     }
 
+    if (key === 'p' || key === 'space') {
+      togglePause(state);
+      return;
+    }
+
     if (state.songs.length > 0) {
       if (key === 'up') {
         state.cursor = (state.cursor - 1 + state.songs.length) % state.songs.length;
@@ -62,8 +89,17 @@ function createApp(songs = []) {
       } else if (key === 'enter') {
         state.currentIndex = state.cursor;
         stopBasic();
-        state.player = playBasic(state.songs[state.cursor].filePath);
+        const player = playBasic(state.songs[state.cursor].filePath);
+        state.player = player;
         state.paused = false;
+        player.on('exit', () => {
+          if (state.player === player) {
+            state.player = null;
+            state.currentIndex = null;
+            state.paused = false;
+            render(state);
+          }
+        });
         render(state);
       }
     }
@@ -72,7 +108,15 @@ function createApp(songs = []) {
   process.stdin.on('data', onData);
 
   function cleanup() {
+    if (state.player && state.paused) {
+      try {
+        state.player.kill('SIGCONT');
+      } catch {}
+    }
     stopBasic();
+    state.player = null;
+    state.currentIndex = null;
+    state.paused = false;
     process.stdin.removeListener('data', onData);
     if (process.stdin.setRawMode) {
       try {
@@ -81,6 +125,9 @@ function createApp(songs = []) {
     }
     process.stdin.pause();
   }
+
+  state.togglePause = () => togglePause(state);
+  state.cleanup = cleanup;
 
   process.stdin.once('end', cleanup);
   process.once('exit', cleanup);
@@ -96,6 +143,7 @@ createApp.createApp = createApp;
 createApp.startApp = createApp;
 createApp.app = createApp;
 createApp.render = render;
+createApp.togglePause = togglePause;
 createApp.default = createApp;
 
 module.exports = createApp;
