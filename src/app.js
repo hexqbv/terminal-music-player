@@ -47,16 +47,26 @@ function render(state) {
 function startProgressTracking(state) {
   // Avoid multiple timers.
   if (state.progressTimer) return;
-  // Cache duration after first fetch.
-  let durationFetched = false;
+  // Why two consecutive matching reads instead of a single fetch-and-cache:
+  // VLC hasn't finished parsing the file immediately after spawn, so the very
+  // first get_length response is often 0 or a tiny placeholder. Caching that
+  // wrong value permanently breaks the progress bar for the whole track.
+  // We keep polling until two back-to-back non-zero identical readings agree,
+  // which is the signal that VLC's demuxer has settled on the real duration.
+  let lastLen = null; // most recent non-zero reading
   state.progressTimer = setInterval(async () => {
     try {
       if (!state.player) return;
-      if (!durationFetched) {
+      if (!state.duration) {
         const len = await getLength(state.player);
-        if (len != null) {
-          state.duration = len;
-          durationFetched = true;
+        if (len && len > 0) {
+          if (len === lastLen) {
+            // Two consecutive matching non-zero readings — safe to trust this.
+            state.duration = len;
+          } else {
+            // First sighting of this value; record it and wait for confirmation.
+            lastLen = len;
+          }
         }
       }
       if (!state.paused && state.duration) {
