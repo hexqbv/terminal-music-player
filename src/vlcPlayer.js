@@ -34,9 +34,58 @@ function quitVlc(vlc) {
   }, 100);
 }
 
+// Query a numeric value from VLC RC interface.
+function queryNumber(vlc, command) {
+  return new Promise(resolve => {
+    // Send command.
+    sendCommand(vlc, command);
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      resolve(null);
+    }, 400);
+    const onData = data => {
+      if (timedOut) return;
+      clearTimeout(timeout);
+      // VLC replies with "<command>: <number>"
+      const match = data.toString().match(/\d+/);
+      if (match) {
+        resolve(parseInt(match[0], 10));
+      } else {
+        resolve(null);
+      }
+      // Remove listener after first data.
+      vlc.stdout.removeListener('data', onData);
+    };
+    vlc.stdout.once('data', onData);
+  });
+}
+
+// Return current playback time in seconds.
+async function getTime(vlc) {
+  try {
+    const sec = await queryNumber(vlc, 'get_time');
+    return sec;
+  } catch {
+    return null;
+  }
+}
+
+// Return total track length in seconds.
+async function getLength(vlc) {
+  try {
+    const sec = await queryNumber(vlc, 'get_length');
+    return sec;
+  } catch {
+    return null;
+  }
+}
+
 module.exports = {
   spawnVlc,
   sendCommand,
   togglePauseVlc,
-  quitVlc
+  quitVlc,
+  getTime,
+  getLength
 };

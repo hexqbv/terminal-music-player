@@ -1,7 +1,6 @@
 const { parseKey } = require('./keys');
-const { spawnVlc, togglePauseVlc, quitVlc } = require('./vlcPlayer');
-
-const { clearLines } = require('./render');
+const { spawnVlc, togglePauseVlc, quitVlc, getLength, getTime } = require('./vlcPlayer');
+const { clearLines, writeProgressLine, renderProgressBar } = require('./render');
 // We'll try VLC first; if spawning fails we'll fall back to basicPlayer.
 
 
@@ -35,8 +34,51 @@ function render(state) {
       linesCount++;
     });
   }
+  // Reserve a blank line for the progress bar.
+  console.log('');
+  linesCount++;
 
   state.lastLinesCount = linesCount;
+}
+
+/**
+ * Starts interval to update progress bar based on VLC playback position.
+ * @param {object} state - App state object
+ */
+function startProgressTracking(state) {
+  // Avoid multiple timers.
+  if (state.progressTimer) return;
+  // Cache duration after first fetch.
+  let durationFetched = false;
+  state.progressTimer = setInterval(async () => {
+    if (!state.player) return;
+    if (!durationFetched) {
+      const len = await getLength(state.player);
+      if (len != null) {
+        state.duration = len;
+        durationFetched = true;
+      }
+    }
+    if (!state.paused && state.duration) {
+      const t = await getTime(state.player);
+      if (t != null) state.elapsed = t;
+    }
+    const bar = renderProgressBar(state.elapsed || 0, state.duration || 0);
+    if (bar) writeProgressLine(bar);
+  }, 500);
+}
+
+/**
+ * Stops the progress tracking interval and clears related state.
+ * @param {object} state - App state object
+ */
+function stopProgressTracking(state) {
+  if (state.progressTimer) {
+    clearInterval(state.progressTimer);
+    state.progressTimer = null;
+  }
+  state.duration = null;
+  state.elapsed = 0;
 }
 
 /**
@@ -62,6 +104,31 @@ function togglePause(state) {
  * @param {boolean} [immediateKill=false] - Whether to SIGKILL immediately
  */
 function stopPlayer(state, immediateKill = false) {
+  if (state && state.player) {
+    // Stop progress bar updates for the current track.
+    stopProgressTracking(state);
+    const player = state.player;
+    state.player = null;
+    state.currentIndex = null;
+    state.paused = false;
+
+    try {
+      quitVlc(player);
+    } catch {}
+
+    if (immediateKill) {
+      try {
+        player.kill('SIGKILL');
+      } catch {}
+    } else {
+      setTimeout(() => {
+        try {
+          player.kill('SIGKILL');
+        } catch {}
+      }, 100).unref();
+    }
+  }
+}
   if (state && state.player) {
     const player = state.player;
     state.player = null;

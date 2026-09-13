@@ -47,8 +47,48 @@ function clearLines(count) {
   return seq;
 }
 
+/**
+ * Formats seconds into "m:ss" string.
+ * @param {number} totalSeconds
+ * @returns {string}
+ */
+function formatTime(totalSeconds) {
+  const m = Math.floor(totalSeconds / 60);
+  const s = Math.floor(totalSeconds % 60);
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+/**
+ * Renders a progress bar.
+ * @param {number} elapsed
+ * @param {number} duration
+ * @param {number} [barWidth=30]
+ * @returns {string}
+ */
+function renderProgressBar(elapsed, duration, barWidth = 30) {
+  if (!duration || duration <= 0) {
+    return '';
+  }
+  const filled = Math.round((elapsed / duration) * barWidth);
+  const empty = barWidth - filled;
+  const bar = '█'.repeat(filled) + '░'.repeat(empty);
+  return `[${bar}] ${formatTime(elapsed)} / ${formatTime(duration)}`;
+}
+
+/**
+ * Writes a progress line in‑place without a trailing newline.
+ * @param {string} text
+ */
+function writeProgressLine(text) {
+  // \r returns to column 0 of the SAME line – that's the whole trick behind a live progress bar.
+  process.stdout.write(`\r${clearLine()}${text}`);
+}
+
 module.exports = {
   moveCursorUp,
   clearLine,
   clearLines,
+  formatTime,
+  renderProgressBar,
+  writeProgressLine,
 };
