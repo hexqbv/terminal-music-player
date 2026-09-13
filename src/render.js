@@ -69,7 +69,12 @@ function renderProgressBar(elapsed, duration, barWidth = 30) {
   if (!duration || duration <= 0) {
     return '';
   }
-  const filled = Math.round((elapsed / duration) * barWidth);
+  // Clamp the ratio to [0, 1]: VLC's get_time can slightly exceed get_length
+  // near the end of a track, which would make `empty` negative and cause
+  // String.repeat() to throw RangeError: Invalid count value.
+  const ratio = Math.min(1, Math.max(0, elapsed / duration));
+  // Second safety net: clamp filled to [0, barWidth] in case of float rounding.
+  const filled = Math.min(barWidth, Math.max(0, Math.round(ratio * barWidth)));
   const empty = barWidth - filled;
   const bar = '█'.repeat(filled) + '░'.repeat(empty);
   return `[${bar}] ${formatTime(elapsed)} / ${formatTime(duration)}`;

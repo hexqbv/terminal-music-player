@@ -50,20 +50,25 @@ function startProgressTracking(state) {
   // Cache duration after first fetch.
   let durationFetched = false;
   state.progressTimer = setInterval(async () => {
-    if (!state.player) return;
-    if (!durationFetched) {
-      const len = await getLength(state.player);
-      if (len != null) {
-        state.duration = len;
-        durationFetched = true;
+    try {
+      if (!state.player) return;
+      if (!durationFetched) {
+        const len = await getLength(state.player);
+        if (len != null) {
+          state.duration = len;
+          durationFetched = true;
+        }
       }
+      if (!state.paused && state.duration) {
+        const t = await getTime(state.player);
+        if (t != null) state.elapsed = t;
+      }
+      const bar = renderProgressBar(state.elapsed || 0, state.duration || 0);
+      if (bar) writeProgressLine(bar);
+    } catch (err) {
+      // Log but do not crash — a transient VLC response error should not kill playback.
+      process.stderr.write(`[progress] ${err.message}\n`);
     }
-    if (!state.paused && state.duration) {
-      const t = await getTime(state.player);
-      if (t != null) state.elapsed = t;
-    }
-    const bar = renderProgressBar(state.elapsed || 0, state.duration || 0);
-    if (bar) writeProgressLine(bar);
   }, 500);
 }
 
