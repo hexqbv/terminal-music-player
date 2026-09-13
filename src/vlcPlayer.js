@@ -2,12 +2,26 @@
 // This replaces the afplay based player because afplay has no stdin and cannot be paused correctly.
 // VLC's RC (remote control) interface allows sending "pause" and "quit" commands over stdin.
 
+const { spawn, spawnSync } = require('child_process');
+
+/**
+ * Checks whether VLC is installed and accessible on the system PATH.
+ * Uses spawnSync so the check is synchronous and happens before the app starts.
+ *
+ * @returns {boolean}
+ */
+function isVlcInstalled() {
+  const result = spawnSync('vlc', ['--version'], { stdio: 'ignore' });
+  // status === 0 means the command ran successfully.
+  return result.status === 0;
+}
+
 function spawnVlc(filePath) {
-  const { spawn } = require('child_process');
   // --play-and-exit makes VLC exit after playback finishes.
   const vlc = spawn('vlc', ['--intf', 'rc', '--play-and-exit', filePath], {
     stdio: ['pipe', 'pipe', 'pipe']
   });
+
   vlc.on('error', err => {
     console.error('Failed to start VLC:', err);
   });
@@ -82,6 +96,7 @@ async function getLength(vlc) {
 }
 
 module.exports = {
+  isVlcInstalled,
   spawnVlc,
   sendCommand,
   togglePauseVlc,

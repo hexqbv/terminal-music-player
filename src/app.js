@@ -168,24 +168,37 @@ function playSong(state, index) {
   state.cursor = index;
   stopPlayer(state);
 
-  // Try VLC first
   try {
     const player = spawnVlc(state.songs[index].filePath);
     state.player = player;
-    state.useBasic = false;
     state.paused = false;
+
+    // 'error' handler: a bad/missing file emits ENOENT instead of crashing the process.
+    player.on('error', (err) => {
+      process.stdout.write(`\nVLC error: ${err.message}\n`);
+      if (state.player === player) {
+        state.player = null;
+        state.currentIndex = null;
+        stopProgressTracking(state);
+        render(state);
+      }
+    });
 
     player.on('exit', () => {
       if (state.player === player) {
         state.player = null;
         state.currentIndex = null;
         state.paused = false;
+        stopProgressTracking(state);
         render(state);
       }
     });
 
-
-  render(state);
+    startProgressTracking(state);
+    render(state);
+  } catch (err) {
+    process.stdout.write(`\nFailed to start VLC: ${err.message}\n`);
+  }
 }
 
 // Track Navigation:
@@ -229,7 +242,10 @@ function createApp(songs = []) {
     currentIndex: null,
     player: null,
     paused: false,
-
+    duration: null,
+    elapsed: 0,
+    progressTimer: null,
+    lastLinesCount: 0,
   };
 
   // Calling process.stdin.setRawMode(true) is the Node equivalent of `stty raw` —
