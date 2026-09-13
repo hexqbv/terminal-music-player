@@ -1,5 +1,5 @@
 const path = require('path');
-const { discoverSongs } = require('./src/discover');
+const discoverSongs = require('./src/discover');
 const createApp = require('./src/app');
 const { isVlcInstalled } = require('./src/vlcPlayer');
 

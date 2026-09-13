@@ -1,13 +1,12 @@
 const { parseKey } = require('./keys');
 const { spawnVlc, togglePauseVlc, quitVlc, getLength, getTime } = require('./vlcPlayer');
 const { clearLines, writeProgressLine, renderProgressBar } = require('./render');
-// We'll try VLC first; if spawning fails we'll fall back to basicPlayer.
-
 
 // Why VLC RC interface instead of afplay:
 // afplay has no stdin, so pausing it with SIGSTOP freezes the OS process
 // but not VLC's underlying audio clock — resuming after a pause could skip ahead.
 // VLC's RC interface is a real two-way protocol where VLC tracks its own position correctly.
+
 
 /**
  * Renders the songs menu to stdout with cursor and playback status.
@@ -129,29 +128,7 @@ function stopPlayer(state, immediateKill = false) {
     }
   }
 }
-  if (state && state.player) {
-    const player = state.player;
-    state.player = null;
-    state.currentIndex = null;
-    state.paused = false;
 
-    try {
-      quitVlc(player);
-    } catch {}
-
-    if (immediateKill) {
-      try {
-        player.kill('SIGKILL');
-      } catch {}
-    } else {
-      setTimeout(() => {
-        try {
-          player.kill('SIGKILL');
-        } catch {}
-      }, 100).unref();
-    }
-  }
-}
 
 /**
  * Plays a song at the specified index using VLC RC interface.
