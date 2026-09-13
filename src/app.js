@@ -1,10 +1,20 @@
 const { parseKey } = require('./keys');
-const { playBasic, stopBasic } = require('./basicPlayer');
-const { clearLines } = require('./render');
+const { spawnVlc, togglePauseVlc, quitVlc } = require('./vlcPlayer');
 
-// Terminal Rendering Architecture:
-// A terminal is a grid of character cells, not a webpage — there's no DOM,
-// so "updating" means overwriting the same cells.
+const { clearLines } = require('./render');
+// We'll try VLC first; if spawning fails we'll fall back to basicPlayer.
+
+
+// Why VLC RC interface instead of afplay:
+// afplay has no stdin, so pausing it with SIGSTOP freezes the OS process
+// but not VLC's underlying audio clock — resuming after a pause could skip ahead.
+// VLC's RC interface is a real two-way protocol where VLC tracks its own position correctly.
+
+/**
+ * Renders the songs menu to stdout with cursor and playback status.
+ *
+ * @param {object} state - App state object
+ */
 function render(state) {
   if (state.lastLinesCount > 0) {
     clearLines(state.lastLinesCount);
@@ -29,26 +39,55 @@ function render(state) {
   state.lastLinesCount = linesCount;
 }
 
-// SIGSTOP and SIGCONT are the same syscalls as running `kill -SIGSTOP <pid>` in a terminal —
-// they freeze/resume a process without killing it, unlike SIGKILL.
+/**
+ * Toggles playback pause/resume via VLC RC interface.
+ *
+ * @param {object} state - App state object
+ */
 function togglePause(state) {
   if (!state || !state.player) {
     return;
   }
 
-  if (state.paused) {
-    state.player.kill('SIGCONT');
-    state.paused = false;
-  } else {
-    state.player.kill('SIGSTOP');
-    state.paused = true;
-  }
+  togglePauseVlc(state.player);
+  state.paused = !state.paused;
 
   render(state);
 }
 
 /**
- * Plays a song at the specified index.
+ * Stops playback by sending quit to VLC and applying SIGKILL as a safety net.
+ *
+ * @param {object} state - App state object
+ * @param {boolean} [immediateKill=false] - Whether to SIGKILL immediately
+ */
+function stopPlayer(state, immediateKill = false) {
+  if (state && state.player) {
+    const player = state.player;
+    state.player = null;
+    state.currentIndex = null;
+    state.paused = false;
+
+    try {
+      quitVlc(player);
+    } catch {}
+
+    if (immediateKill) {
+      try {
+        player.kill('SIGKILL');
+      } catch {}
+    } else {
+      setTimeout(() => {
+        try {
+          player.kill('SIGKILL');
+        } catch {}
+      }, 100).unref();
+    }
+  }
+}
+
+/**
+ * Plays a song at the specified index using VLC RC interface.
  *
  * @param {object} state - App state object
  * @param {number} index - Index of the song to play
@@ -60,20 +99,24 @@ function playSong(state, index) {
 
   state.currentIndex = index;
   state.cursor = index;
-  stopBasic();
+  stopPlayer(state);
 
-  const player = playBasic(state.songs[index].filePath);
-  state.player = player;
-  state.paused = false;
+  // Try VLC first
+  try {
+    const player = spawnVlc(state.songs[index].filePath);
+    state.player = player;
+    state.useBasic = false;
+    state.paused = false;
 
-  player.on('exit', () => {
-    if (state.player === player) {
-      state.player = null;
-      state.currentIndex = null;
-      state.paused = false;
-      render(state);
-    }
-  });
+    player.on('exit', () => {
+      if (state.player === player) {
+        state.player = null;
+        state.currentIndex = null;
+        state.paused = false;
+        render(state);
+      }
+    });
+
 
   render(state);
 }
@@ -96,17 +139,7 @@ function playRelative(state, offset) {
 // Without this cleanup, an orphaned child process keeps running with no parent
 // to stop it, and the terminal is left stuck in raw mode.
 function cleanupAndExit(state) {
-  if (state && state.player && state.paused) {
-    try {
-      state.player.kill('SIGCONT');
-    } catch {}
-  }
-  stopBasic();
-  if (state) {
-    state.player = null;
-    state.currentIndex = null;
-    state.paused = false;
-  }
+  stopPlayer(state, true);
   if (process.stdin.setRawMode) {
     try {
       process.stdin.setRawMode(false);
@@ -129,7 +162,7 @@ function createApp(songs = []) {
     currentIndex: null,
     player: null,
     paused: false,
-    lastLinesCount: 0,
+
   };
 
   // Calling process.stdin.setRawMode(true) is the Node equivalent of `stty raw` —
@@ -183,6 +216,7 @@ function createApp(songs = []) {
   state.togglePause = () => togglePause(state);
   state.playRelative = (offset) => playRelative(state, offset);
   state.cleanupAndExit = () => cleanupAndExit(state);
+  state.stopPlayer = () => stopPlayer(state);
 
   process.stdin.once('end', () => cleanupAndExit(state));
   process.on('SIGINT', () => cleanupAndExit(state));
@@ -198,6 +232,7 @@ createApp.render = render;
 createApp.togglePause = togglePause;
 createApp.playSong = playSong;
 createApp.playRelative = playRelative;
+createApp.stopPlayer = stopPlayer;
 createApp.cleanupAndExit = cleanupAndExit;
 createApp.default = createApp;
 
